@@ -1,0 +1,10 @@
+packages:
+  - apps/*
+  - packages/*
+onlyBuiltDependencies:
+  - esbuild
+  - '@embedded-postgres/windows-x64'
+  - '@embedded-postgres/linux-x64'
+  - '@embedded-postgres/darwin-arm64'
+overrides:
+  esbuild: 0.28.2

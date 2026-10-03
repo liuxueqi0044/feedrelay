@@ -1,0 +1,6 @@
+{
+  "name": "@feedrelay/server", "version": "0.1.0", "private": true, "type": "module",
+  "scripts": { "dev": "tsx watch src/main.ts", "start": "tsx src/main.ts", "build": "tsc --noEmit", "typecheck": "tsc --noEmit", "db:migrate": "tsx src/scripts/migrate.ts", "bot:setup": "tsx src/scripts/setup-bot.ts", "recover": "tsx src/scripts/recover.ts" },
+  "dependencies": { "@feedrelay/core": "workspace:*", "@feedrelay/sources": "workspace:*", "@feedrelay/billing": "workspace:*", "fastify": "5.12.5", "@fastify/cookie": "11.0.2", "@fastify/helmet": "13.0.2", "@fastify/rate-limit": "10.3.0", "drizzle-orm": "0.45.3", "pg": "8.20.0", "pg-boss": "12.36.0", "openid-client": "6.8.8", "zod": "4.3.6", "dotenv": "17.3.1", "tsx": "4.21.0" },
+  "devDependencies": { "@types/pg": "8.18.0" }
+}

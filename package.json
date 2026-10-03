@@ -1,0 +1,27 @@
+{
+  "name": "feedrelay",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@10.32.1",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n api,web \"pnpm --filter @feedrelay/server dev\" \"pnpm --filter @feedrelay/web dev\"",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run",
+    "demo": "pnpm dev",
+    "db:migrate": "pnpm --filter @feedrelay/server db:migrate",
+    "bot:setup": "pnpm --filter @feedrelay/server bot:setup",
+    "test:integration": "vitest run tests/integration"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.15",
+    "concurrently": "10.0.5",
+    "embedded-postgres": "18.4.0-beta.17",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11"
+  }
+}

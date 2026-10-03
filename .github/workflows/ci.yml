@@ -1,0 +1,46 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      MODE: demo
+      NODE_ENV: test
+      NEXT_TELEMETRY_DISABLED: '1'
+      API_BASE: http://127.0.0.1:4100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck every workspace
+        run: pnpm typecheck
+      - name: Run unit, fault recovery, and embedded PostgreSQL integration tests
+        # Hosted Ubuntu's runner user is unprivileged; do not run initdb via sudo.
+        run: |
+          test "$(id -u)" -ne 0
+          pnpm test
+      - name: Build production web application
+        run: pnpm --filter @feedrelay/web build
+      - name: Audit production dependencies
+        run: pnpm audit --prod --registry=https://registry.npmjs.org

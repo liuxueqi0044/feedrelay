@@ -1,0 +1,184 @@
+name: feedrelay
+
+x-app-environment: &app-environment
+  MODE: production
+  NODE_ENV: production
+  DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL using host postgres and a URL-encoded password}
+  PUBLIC_URL: ${PUBLIC_URL:?Set the public HTTPS URL}
+  BOT_ID: ${BOT_ID:?Set the Telegram bot identifier}
+  BOT_USERNAME: ${BOT_USERNAME:?Set the Telegram bot username}
+  BILLING_ENABLED: ${BILLING_ENABLED:-false}
+  STARTER_STARS: ${STARTER_STARS:-300}
+  SUPPORT_EMAIL: ${SUPPORT_EMAIL:-}
+  TERMS_URL: ${TERMS_URL:-}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+
+x-server: &server
+  image: feedrelay-server:${FEEDRELAY_TAG:-local}
+  build:
+    context: ..
+    dockerfile: deploy/server.Dockerfile
+  restart: unless-stopped
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:mode=1777
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  stop_grace_period: 60s
+  networks: [backend, egress]
+  logging:
+    driver: json-file
+    options: {max-size: 10m, max-file: '3'}
+  depends_on:
+    postgres: {condition: service_healthy}
+    migrate: {condition: service_completed_successfully}
+
+services:
+  postgres:
+    image: postgres:16-bookworm
+    user: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-feedrelay}
+      POSTGRES_USER: ${POSTGRES_USER:-feedrelay}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a random database password}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    tmpfs:
+      - /tmp:mode=1777
+      - /var/run/postgresql:uid=999,gid=999,mode=0755
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [backend]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    stop_grace_period: 60s
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+
+  migrate:
+    <<: *server
+    restart: 'no'
+    environment:
+      MODE: production
+      ROLE: fetch-worker
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL}
+      PUBLIC_URL: ${PUBLIC_URL:?Set PUBLIC_URL}
+      BOT_ID: ${BOT_ID:?Set BOT_ID}
+    command: [pnpm, --filter, '@feedrelay/server', 'db:migrate']
+    networks: [backend]
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  api:
+    <<: *server
+    environment:
+      <<: *app-environment
+      ROLE: api
+      HOST: 0.0.0.0
+      PORT: 4100
+      BOT_TOKEN: ${BOT_TOKEN:?Set the production bot token}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:?Set a random webhook secret of at least 32 characters}
+      TELEGRAM_CLIENT_ID: ${TELEGRAM_CLIENT_ID:?Set the Telegram OIDC client ID}
+      TELEGRAM_CLIENT_SECRET: ${TELEGRAM_CLIENT_SECRET:?Set the Telegram OIDC client secret}
+    healthcheck:
+      test: [CMD, node, --input-type=module, -e, 'fetch("http://127.0.0.1:4100/healthz").then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))']
+      interval: 20s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  control-worker:
+    <<: *server
+    environment:
+      <<: *app-environment
+      ROLE: control-worker
+      BOT_TOKEN: ${BOT_TOKEN:?Set BOT_TOKEN}
+    mem_limit: 768m
+
+  fetch-worker:
+    <<: *server
+    # Explicit allowlist: do not add env_file or inherit credentials here.
+    environment:
+      MODE: production
+      ROLE: fetch-worker
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL}
+      PUBLIC_URL: ${PUBLIC_URL:?Set PUBLIC_URL}
+      BOT_ID: ${BOT_ID:?Set BOT_ID}
+      FETCH_CONCURRENCY: ${FETCH_CONCURRENCY:-4}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    mem_limit: 768m
+
+  delivery-worker:
+    <<: *server
+    environment:
+      <<: *app-environment
+      ROLE: delivery-worker
+      BOT_TOKEN: ${BOT_TOKEN:?Set BOT_TOKEN}
+    mem_limit: 512m
+
+  web:
+    image: feedrelay-web:${FEEDRELAY_TAG:-local}
+    build:
+      context: ..
+      dockerfile: deploy/web.Dockerfile
+      args:
+        API_BASE: http://api:4100
+        NEXT_PUBLIC_SITE_URL: ${PUBLIC_URL:?Set the public HTTPS URL}
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: '1'
+      API_BASE: http://api:4100
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+      - /app/apps/web/.next/cache:uid=1000,gid=1000,mode=0700
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [backend]
+    depends_on:
+      api: {condition: service_healthy}
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?Set the hostname without a URL scheme}
+      ACME_EMAIL: ${ACME_EMAIL:?Set the certificate contact email}
+    ports: ['80:80', '443:443', '443:443/udp']
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    read_only: true
+    tmpfs: [/tmp:mode=1777]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    networks: [backend, egress]
+    depends_on:
+      api: {condition: service_healthy}
+      web: {condition: service_started}
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+
+networks:
+  backend: {internal: true}
+  egress: {}
+volumes:
+  postgres_data: {}
+  caddy_data: {}
+  caddy_config: {}

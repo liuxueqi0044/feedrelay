@@ -1,0 +1,9 @@
+{
+  "name": "@feedrelay/sources",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": { "build": "tsc --noEmit", "typecheck": "tsc --noEmit" },
+  "dependencies": { "fast-xml-parser": "5.11.2", "ipaddr.js": "2.5.0" }
+}

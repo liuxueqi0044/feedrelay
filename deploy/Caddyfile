@@ -1,0 +1,23 @@
+{
+  email {$ACME_EMAIL}
+  admin off
+}
+
+{$DOMAIN} {
+  encode zstd gzip
+  header {
+    Strict-Transport-Security "max-age=31536000"
+    X-Content-Type-Options "nosniff"
+    Referrer-Policy "same-origin"
+    -Server
+  }
+  handle /api/* {
+    reverse_proxy api:4100
+  }
+  handle /healthz {
+    reverse_proxy api:4100
+  }
+  handle {
+    reverse_proxy web:3000
+  }
+}

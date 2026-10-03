@@ -1,0 +1,27 @@
+# Independent staging database only. No app, worker, public port or Telegram token.
+name: feedrelay-restore-staging
+services:
+  postgres:
+    image: postgres:16-bookworm
+    user: postgres
+    environment:
+      POSTGRES_DB: feedrelay_restore_staging
+      POSTGRES_USER: feedrelay_restore_staging
+      POSTGRES_PASSWORD: ${STAGING_POSTGRES_PASSWORD:?Set a fresh staging database password}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    volumes: [restore_staging_data:/var/lib/postgresql/data]
+    tmpfs:
+      - /tmp:mode=1777
+      - /var/run/postgresql:uid=999,gid=999,mode=0755
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [staging]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+networks:
+  staging: {internal: true}
+volumes:
+  restore_staging_data: {}
