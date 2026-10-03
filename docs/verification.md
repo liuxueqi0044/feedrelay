@@ -5,10 +5,12 @@
 - `pnpm test`：7 个测试文件、146 项测试全部通过。
 - `pnpm typecheck`：全部工作空间包通过。
 - 真实 PostgreSQL + pg-boss 集成：7 项通过，包括从采集、规则基线到投递和配额计量的完整链路。
-- 英文官网与控制台 Next.js 构建曾通过；最终移动布局补丁之后需要重新构建。
+- 英文官网与控制台 Next.js 生产构建已在 GitHub Ubuntu CI 中通过。补丁后浏览器 390px 视口复查，页面滚动宽度已为 390px，没有整页横向溢出。
 - 浏览器演示：登录、添加 sample feed、连接模拟私聊、创建规则、基线完成后发布文章，Delivery logs 显示 Sent，配额计量为 1。
 - npm 官方注册表依赖审计在本次开发中检查为 0 个漏洞；CI 会重新验证生产依赖。
 - Docker Desktop 已恢复 Client + Linux Server。启动失败由遗留 AF_UNIX 通信文件引起；仅改名备份 runtime socket 目录，没有重置 Docker 数据或注销 WSL。
 - Docker Compose 配置校验通过。第一次镜像构建遇到当时正在编辑的 Processor 语法错误；该错误已修复，之后完整类型检查和测试均通过，但尚未重新构建镜像和启动容器。
+- 私有仓库 `liuxueqi0044/feedrelay` 的第一次 GitHub CI 已全部成功：类型检查、完整测试、官网生产构建及生产依赖审计。运行记录：https://github.com/liuxueqi0044/feedrelay/actions/runs/37139491445 。
+- `.github/workflows/docker-smoke.yml` 已保存，用于在 GitHub 云端运行实际镜像构建和隔离容器验证。YAML 及全部 Bash 代码块语法检查通过；交接时尚未取得该流程的执行结果，不能视作容器验收已经通过。
 
 以上投递和账单测试均使用本机模拟传输，不代表真实 Telegram 接入、付款、退款或 OIDC 验收。尚未进行真实 HTTPS 部署、备份恢复演练、千源负载测试和正式服务条款审定。默认关闭收费，正式启用前按部署文档补全接入和验收。
