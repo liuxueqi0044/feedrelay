@@ -19,7 +19,6 @@ jobs:
     timeout-minutes: 30
     env:
       COMPOSE_PROJECT_NAME: feedrelay-smoke-${{ github.run_id }}-${{ github.run_attempt }}
-      SMOKE_DIR: ${{ runner.temp }}/feedrelay-smoke
     steps:
       - uses: actions/checkout@v4
 
@@ -27,6 +26,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          SMOKE_DIR="$RUNNER_TEMP/feedrelay-smoke"
+          echo "SMOKE_DIR=$SMOKE_DIR" >> "$GITHUB_ENV"
           mkdir -p "$SMOKE_DIR"
           cat > "$SMOKE_DIR/smoke.env" <<EOF
           FEEDRELAY_TAG=$COMPOSE_PROJECT_NAME
