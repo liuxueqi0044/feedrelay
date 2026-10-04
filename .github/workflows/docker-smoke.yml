@@ -26,6 +26,12 @@ jobs:
       - name: Build and test isolated production images
         run: node deploy/smoke.mjs
 
+      - name: Verify isolated logical backup and restore
+        run: |
+          set -euo pipefail
+          docker build --file deploy/server.Dockerfile --tag feedrelay-server:recovery-ci .
+          node deploy/recovery-smoke.mjs --server-image feedrelay-server:recovery-ci | tee "$RUNNER_TEMP/feedrelay-recovery.log"
+
       # Normally finally has already removed the project. Also covers a canceled
       # step after the script wrote the record path to GITHUB_ENV.
       - name: Verify cleanup of only this run's resources
@@ -44,3 +50,4 @@ jobs:
             work/deploy-smoke/*/results.json
             work/deploy-smoke/*/commands.log
             work/deploy-smoke/*/runtime.log
+            ${{ runner.temp }}/feedrelay-recovery.log

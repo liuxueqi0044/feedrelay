@@ -1,6 +1,49 @@
 # Backup and recovery runbook
 
-Recovery time and recovery point objectives below are planning targets. No live off-host backup, PostgreSQL restore, Telegram reconciliation, or timed disaster recovery drill has been executed as part of creating these files. Log the achieved times and retained recovery points after every drill.
+The isolated synthetic PostgreSQL logical dump/restore drill below has passed locally. Recovery time and recovery point objectives for production remain planning targets. Encryption/decryption, live off-host backup, retention, Telegram reconciliation and production worker recovery have not been verified. Log the achieved times and retained recovery points after every drill.
+
+## Local logical recovery acceptance
+
+Run the repeatable drill from the repository root with Node.js and the Docker Linux engine. Supply a locally built server image; the script does not build images or read production environment files. For example:
+
+```sh
+docker build --file deploy/server.Dockerfile --tag feedrelay-server:recovery-drill .
+node deploy/recovery-smoke.mjs --server-image feedrelay-server:recovery-drill
+```
+
+The script creates a random project name, an internal Docker network, two PostgreSQL containers, two data volumes and its own server image alias. It publishes no host ports. It runs the actual migrations, `PostgresStore` and `BillingService` against synthetic records, without creating a Telegram client or starting the application/worker processes. Synthetic billing receipts are local database fixtures and make no payment or invoice requests. The custom-format archive stays in process memory, is catalog-checked, and is restored into the second database using `pg_restore --exit-on-error --single-transaction`. Cleanup checks ownership labels and removes only resources created by that run, including its image alias; it preserves the supplied server image and shared PostgreSQL image.
+
+On **2026-10-04 at 01:03:12 UTC**, project `feedrelay-recovery-20261004010303-39ceef83de2a60db` passed using Docker Engine **29.8.0**:
+
+| Evidence | Observed result |
+| --- | --- |
+| PostgreSQL image | `postgres:16-bookworm`, digest `sha256:efedf3595f1d6f415c08568ba171029bf54052e754cc9f030e3f2412b21f3d67` |
+| Server image | Local runtime image ID `sha256:2b4bee489891c194135d270f8df4c0c76b717cf2486b850d088a431141bb7d1d` |
+| Migrations | Versions 1, 2 and 3 restored |
+| Custom archive | 70,631 bytes; SHA-256 `7e8860463a85bb98b435b2ad90fe37447617108ebfc9d94c39cd2261059f38a0`; not retained |
+| Record verification | All 31 business envelopes and per-table row counts matched; source and restored digest `2ce061d85600d1cf637a802dafc1b9af540e0e5a428fde57e28dbaae3af8d5cc` |
+| Isolation | Internal network, zero published ports, no real database or Telegram access |
+| Cleanup | All run-owned containers, volumes, network and image alias removed |
+
+The fixture retained one user, workspace, source, source binding, destination and route; two items and aliases; two deliveries and attempts; two pending outbox events; one audit record; one checkout and subscription; two payments and grants; one refund; three billing events; one usage period; two reservations; and one ledger entry. The route cursor/baseline, source sequence, filters, retained Unicode article content and workspace ownership matched after restore.
+
+The sent delivery kept its Telegram message identifier and exactly one committed usage ledger entry. The unknown delivery kept its uncertainty, attempt count and capped-retry counter, with its unknown reservation still consuming reserved quota and no fabricated message identifier. Paid grants still matched known synthetic charge identities, checkout payloads and exact 30-day receipt periods. The refunded renewal remained revoked, so restored entitlements showed Starter with used **1**, reserved **1**, and paid-through **2026-11-02T00:00:00Z**, without extending access over the refunded period.
+
+Thirteen negative insert probes passed both before and after restore: Telegram identity, source URL, active binding, active destination chat, item sequence, active route, logical delivery, logical usage ledger, payment charge, paid-grant charge and delivery-period reservation uniqueness, plus record ID and workspace envelope checks. These are database uniqueness/CHECK constraints and application relationship assertions; the current JSON business envelope schema does not define foreign keys.
+
+| Timed phase | Seconds |
+| --- | ---: |
+| Image inspection/alias | 1.597 |
+| Isolated database startup | 3.789 |
+| Source migration, fixture and verification | 1.267 |
+| Custom dump | 0.329 |
+| Archive catalog check | 0.287 |
+| Single-transaction restore | 0.478 |
+| Restored business verification | 0.971 |
+| Owned resource cleanup | 3.533 |
+| Entire drill | 12.252 |
+
+The timed drill excludes server image building and uses a tiny synthetic database. It establishes logical restore correctness for that fixture, not a production RTO/RPO. `age` was unavailable on the local operator host, so encryption/decryption was not tested. Off-host transfer, scheduling, immutable retention, roles/secrets restoration, pg-boss queue recovery, the production freeze/rebaseline command, and Telegram billing/send reconciliation remain unverified. The `backup.sh` and `restore-staging.sh` procedures below still need their own encrypted, off-host operator drill.
 
 ## Encrypted logical backups
 

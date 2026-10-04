@@ -71,9 +71,12 @@ pnpm typecheck
 pnpm test
 pnpm build
 pnpm audit --registry=https://registry.npmjs.org
+pnpm docker:smoke
+docker build --file deploy/server.Dockerfile --tag feedrelay-server:recovery-drill .
+node deploy/recovery-smoke.mjs --server-image feedrelay-server:recovery-drill
 ```
 
-测试包含安全抓取、RSS／Atom、账单、领域流程、Fastify API、真实 PostgreSQL 和 pg-boss。PostgreSQL 测试启动仅监听本机的临时数据库，不连接生产数据库、不发送真实 Telegram 消息。CI 在 `.github/workflows/ci.yml`。测试结果和外部接入边界见 [交付验证记录](docs/verification.md)。
+测试包含安全抓取、RSS／Atom、账单、领域流程、Fastify API、真实 PostgreSQL 和 pg-boss。PostgreSQL 测试启动仅监听本机的临时数据库，不连接生产数据库、不发送真实 Telegram 消息。最后三条命令需要本机 Linux Docker，使用独立资源验证真实生产镜像和合成数据恢复；不公开端口，结束后清理本次资源。CI 在 `.github/workflows/ci.yml` 和 `.github/workflows/docker-smoke.yml`。测试结果和外部接入边界见 [交付验证记录](docs/verification.md)。
 
 ## 首版边界
 
