@@ -17,7 +17,8 @@ const rules=z.object({include:z.array(z.string().trim().min(1).max(100)).max(20)
 const routeInput=z.object({name:z.string().trim().min(1).max(100),sourceBindingId:id,destinationId:id,requestedIntervalMinutes:z.number().int().min(5).max(1440),rules:rules.default(DEFAULT_RULES)});
 const params=(input:unknown)=>z.object({id}).parse(input).id;
 export async function createApi(config:Config,auth:AuthService,feeds:FeedService,processor:Processor){
-  const app=Fastify({logger:{level:config.LOG_LEVEL,redact:['req.headers.cookie','req.headers.authorization','req.headers.x-telegram-bot-api-secret-token','req.headers.x-csrf-token','res.headers.set-cookie']},bodyLimit:1024*1024,trustProxy:false});
+  const trustedProxies=config.TRUSTED_PROXY_CIDRS.split(',').map(value=>value.trim()).filter(Boolean);
+  const app=Fastify({logger:{level:config.LOG_LEVEL,redact:['req.headers.cookie','req.headers.authorization','req.headers.x-telegram-bot-api-secret-token','req.headers.x-csrf-token','res.headers.set-cookie']},bodyLimit:1024*1024,trustProxy:trustedProxies.length?trustedProxies:false});
   await app.register(cookie);await app.register(helmet);await app.register(rateLimit,{max:120,timeWindow:'1 minute'});
   app.decorateRequest('actor',null as unknown as Actor);app.decorateRequest('csrf','');
   app.setErrorHandler((error,_request,reply)=>{

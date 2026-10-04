@@ -19,6 +19,14 @@ function matches(row: Entity, filter: Filter) {
     return (rule.lt===undefined || compare(value,rule.lt)<0) && (rule.lte===undefined || compare(value,rule.lte)<=0) && (rule.gt===undefined || compare(value,rule.gt)>0) && (rule.gte===undefined || compare(value,rule.gte)>=0) && (!rule.in || rule.in.includes(value as never)) && (rule.ne===undefined || value!==rule.ne);
   });
 }
+function sqlState(error:unknown):string|undefined {
+  let value=error as {code?:string;cause?:unknown}|undefined;
+  for(let depth=0;depth<6&&value;depth++){
+    if(typeof value.code==='string')return value.code;
+    value=value.cause&&typeof value.cause==='object'?value.cause as typeof value:undefined;
+  }
+  return undefined;
+}
 export class MemoryStore implements Store {
   private records: Record<Table,Map<string,Entity>>;
   private tail: Promise<void> = Promise.resolve();
@@ -80,10 +88,33 @@ export class PostgresStore implements Store {
     };
   }
   async transaction<T>(keys:string[],callback:(tx:Tx)=>Promise<T>):Promise<T>{
-    for(let attempt=0;;attempt++)try{return await this.db.transaction(async db=>{
-      for(const key of [...new Set(keys)].sort())await db.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${key},0))`);
-      return callback(this.tx(db));
-    },{isolationLevel:'serializable'});}catch(e){const err=e as {code?:string;cause?:{code?:string}};if(attempt<5&&['40001','40P01'].includes(err.code??err.cause?.code??''))continue;throw e;}
+    const lockKeys=[...new Set(keys)].sort();
+    for(let attempt=0;;attempt++){
+      const client=await this.pool.connect(),acquired:string[]=[];
+      let failure:unknown,destroy=false,locksReady=false;
+      try{
+        // Waiting inside SERIALIZABLE would pin a snapshot from before the previous owner commits.
+        // Hold session locks on this reserved connection before BEGIN establishes the snapshot.
+        for(const key of lockKeys){await client.query('SELECT pg_advisory_lock(hashtextextended($1,0))',[key]);acquired.push(key);}
+        locksReady=true;
+        return await drizzle(client).transaction(db=>callback(this.tx(db)),{isolationLevel:'serializable'});
+      }catch(error){
+        failure=error;
+        // A lost acquisition reply may hide a lock already granted by PostgreSQL.
+        if(!locksReady)destroy=true;
+      }
+      finally{
+        for(const key of acquired.reverse())try{
+          const result=await client.query<{unlocked:boolean}>('SELECT pg_advisory_unlock(hashtextextended($1,0)) AS unlocked',[key]);
+          if(result.rows[0]?.unlocked!==true){destroy=true;break;}
+        }catch{destroy=true;break;}
+        // A broken cleanup must never return a session holding locks to the pool.
+        // Keep the committed result/original error: cleanup failure must not replay committed writes.
+        client.release(destroy);
+      }
+      if(attempt<5&&['40001','40P01'].includes(sqlState(failure)??''))continue;
+      throw failure;
+    }
   }
   async read<T>(callback:(tx:Tx)=>Promise<T>){return this.db.transaction(db=>callback(this.tx(db)),{isolationLevel:'repeatable read',accessMode:'read only'});}
   async close(){await this.pool.end();}

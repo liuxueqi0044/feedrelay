@@ -15,7 +15,8 @@
     "demo": "pnpm dev",
     "db:migrate": "pnpm --filter @feedrelay/server db:migrate",
     "bot:setup": "pnpm --filter @feedrelay/server bot:setup",
-    "test:integration": "vitest run tests/integration"
+    "test:integration": "vitest run tests/integration",
+    "docker:smoke": "node deploy/smoke.mjs"
   },
   "devDependencies": {
     "@types/node": "22.19.15",

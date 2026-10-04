@@ -74,7 +74,7 @@ export function Workspace() {
 
   const active = tabs.find(x => x.id === tab)!; const overview = data.overview; const billing = data.billing; const minInterval = billing?.entitlements.minIntervalMinutes ?? 60; const usage = overview?.usage ?? billing?.usage; const demo = config.mode === "demo";
   const pageAction: Partial<Record<Tab, ReactNode>> = {
-    sources: <div className="header-actions"><button className="button secondary" onClick={() => open({ type: "import" })}><Icon name="upload" size={16}/><span>Import OPML</span></button><button className="button primary" onClick={() => open({ type: "source" })}><Icon name="plus" size={17}/>Add source</button></div>,
+    sources: <div className="header-actions"><button className="button secondary" aria-label="Import OPML" title="Import OPML" onClick={() => open({ type: "import" })}><Icon name="upload" size={16}/><span>Import OPML</span></button><button className="button primary" onClick={() => open({ type: "source" })}><Icon name="plus" size={17}/>Add source</button></div>,
     destinations: <button className="button primary" onClick={() => open({ type: "destination" })}><Icon name="plus" size={17}/>Add destination</button>,
     routes: <button className="button primary" onClick={() => open({ type: "route" })} disabled={!data.sources.length || !data.destinations.length}><Icon name="plus" size={17}/>Create route</button>,
     overview: <button className="button secondary refresh-button" disabled={refreshing} onClick={() => void reload()}><Icon name="refresh" size={16} className={refreshing ? "spin" : ""}/>Refresh</button>,

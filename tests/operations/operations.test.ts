@@ -14,7 +14,7 @@ afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
 async function fixture() {
   const store = new MemoryStore();
-  const config: Config = { MODE: 'demo', ROLE: 'all', NODE_ENV: 'test', PORT: 4100, HOST: '127.0.0.1', PUBLIC_URL: 'http://localhost:3000', BOT_ID: 'operations-bot', BOT_USERNAME: 'OperationsTestBot', BILLING_ENABLED: 'false', STARTER_STARS: 300, SUPPORT_EMAIL: 'support@example.test', TERMS_URL: 'https://example.test/terms', DEMO_DATA_PATH: 'work/unused-operations.json', LOG_LEVEL: 'error', FETCH_CONCURRENCY: 4 };
+  const config: Config = { MODE: 'demo', ROLE: 'all', NODE_ENV: 'test', PORT: 4100, HOST: '127.0.0.1', TRUSTED_PROXY_CIDRS: '', PUBLIC_URL: 'http://localhost:3000', BOT_ID: 'operations-bot', BOT_USERNAME: 'OperationsTestBot', BILLING_ENABLED: 'false', STARTER_STARS: 300, SUPPORT_EMAIL: 'support@example.test', TERMS_URL: 'https://example.test/terms', DEMO_DATA_PATH: 'work/unused-operations.json', LOG_LEVEL: 'error', FETCH_CONCURRENCY: 4 };
   // Billing is exercised locally using authenticated receipt fixtures; transport remains demo-only.
   const billing = new BillingService(store, { botId: config.BOT_ID, priceStars: 300, billingEnabled: true, termsUrl: config.TERMS_URL, supportContact: config.SUPPORT_EMAIL });
   const telegram = new TelegramClient(undefined, true);

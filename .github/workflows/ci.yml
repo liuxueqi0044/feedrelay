@@ -33,7 +33,8 @@ jobs:
           cache: pnpm
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
-      - name: Typecheck every workspace
+      - name: Generate Next route types and typecheck every workspace
+        # The web typecheck script runs next typegen before tsc, including on clean checkouts.
         run: pnpm typecheck
       - name: Run unit, fault recovery, and embedded PostgreSQL integration tests
         # Hosted Ubuntu's runner user is unprivileged; do not run initdb via sudo.

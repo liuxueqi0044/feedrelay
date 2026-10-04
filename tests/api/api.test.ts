@@ -15,8 +15,8 @@ const apps: Array<Awaited<ReturnType<typeof createApi>>> = [];
 beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(START); });
 afterEach(async () => { for (const app of apps.splice(0)) await app.close(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
-async function fixture(mode: Config['MODE'] = 'demo') {
-  const config: Config = { MODE: mode, ROLE: 'all', NODE_ENV: 'test', PORT: 4100, HOST: '127.0.0.1', PUBLIC_URL: mode === 'demo' ? 'http://localhost:3000' : 'https://feedrelay.example.com', BOT_ID: 'api-test-bot', BOT_USERNAME: 'ApiTestBot', BOT_TOKEN: 'test-only-token', WEBHOOK_SECRET: 'test-webhook-secret-with-at-least-32-characters', BILLING_ENABLED: 'false', STARTER_STARS: 300, SUPPORT_EMAIL: 'support@example.com', TERMS_URL: 'https://example.com/terms', DEMO_DATA_PATH: 'work/test-unused.json', LOG_LEVEL: 'silent', FETCH_CONCURRENCY: 4 };
+async function fixture(mode: Config['MODE'] = 'demo', trustedProxies = '') {
+  const config: Config = { MODE: mode, ROLE: 'all', NODE_ENV: 'test', PORT: 4100, HOST: '127.0.0.1', TRUSTED_PROXY_CIDRS: trustedProxies, PUBLIC_URL: mode === 'demo' ? 'http://localhost:3000' : 'https://feedrelay.example.com', BOT_ID: 'api-test-bot', BOT_USERNAME: 'ApiTestBot', BOT_TOKEN: 'test-only-token', WEBHOOK_SECRET: 'test-webhook-secret-with-at-least-32-characters', BILLING_ENABLED: 'false', STARTER_STARS: 300, SUPPORT_EMAIL: 'support@example.com', TERMS_URL: 'https://example.com/terms', DEMO_DATA_PATH: 'work/test-unused.json', LOG_LEVEL: 'silent', FETCH_CONCURRENCY: 4 };
   const store = new MemoryStore();
   const billing = new BillingService(store, { botId: config.BOT_ID, billingEnabled: false });
   const telegram = new TelegramClient(undefined, true);
@@ -44,6 +44,38 @@ async function fixture(mode: Config['MODE'] = 'demo') {
 }
 
 describe('API session and workspace boundaries', () => {
+  it('round trips the built-in sandbox feed through OPML without allowing private or invalid production sources', async () => {
+    const demo=await fixture(),account=await demo.login();
+    await demo.feeds.addSource(account.actor,'https://demo.feedrelay.invalid/engineering.xml');
+    const exported=await demo.app.inject({method:'GET',url:'/api/exports/opml',headers:account.headers});
+    expect(exported.statusCode).toBe(200);expect(exported.headers['content-type']).toContain('application/xml');
+    const preview=await demo.app.inject({method:'POST',url:'/api/imports/preview',headers:account.headers,payload:{opml:exported.body}});
+    expect(preview.statusCode).toBe(200);expect(preview.json().feeds).toHaveLength(1);
+    const imported=await demo.app.inject({method:'POST',url:'/api/imports',headers:account.headers,payload:{feeds:preview.json().feeds}});
+    expect(imported.statusCode).toBe(200);expect(imported.json().results[0].error).toBeUndefined();expect(await demo.feeds.listSources(account.actor)).toHaveLength(1);
+    const privateUrl='<opml version="2.0"><body><outline xmlUrl="http://127.0.0.1/feed"/></body></opml>';
+    expect((await demo.app.inject({method:'POST',url:'/api/imports/preview',headers:account.headers,payload:{opml:privateUrl}})).statusCode).toBe(400);
+    const prod=await fixture('production'),owner=await prod.login();
+    expect((await prod.app.inject({method:'POST',url:'/api/imports/preview',headers:owner.headers,payload:{opml:exported.body}})).statusCode).toBe(400);
+  });
+  it('limits clients independently through a configured private proxy and ignores spoofed forwarded addresses from direct clients', async () => {
+    const proxied = await fixture('production', '172.20.0.0/16');
+    for (let i = 0; i < 120; i++) {
+      const response = await proxied.app.inject({ method: 'GET', url: '/api/config', remoteAddress: '172.20.0.2', headers: { 'x-forwarded-for': '198.51.100.10' } });
+      expect(response.statusCode).toBe(200);
+    }
+    expect((await proxied.app.inject({ method: 'GET', url: '/api/config', remoteAddress: '172.20.0.2', headers: { 'x-forwarded-for': '198.51.100.10' } })).statusCode).toBe(429);
+    expect((await proxied.app.inject({ method: 'GET', url: '/api/config', remoteAddress: '172.20.0.2', headers: { 'x-forwarded-for': '198.51.100.11' } })).statusCode).toBe(200);
+    for (let i = 0; i < 120; i++) {
+      expect((await proxied.app.inject({ method: 'GET', url: '/api/config', remoteAddress: '203.0.113.10', headers: { 'x-forwarded-for': `198.51.100.${i + 1}` } })).statusCode).toBe(200);
+    }
+    expect((await proxied.app.inject({ method: 'GET', url: '/api/config', remoteAddress: '203.0.113.10', headers: { 'x-forwarded-for': '198.51.100.200' } })).statusCode).toBe(429);
+    const direct = await fixture();
+    for (let i = 0; i < 120; i++) {
+      expect((await direct.app.inject({ method: 'GET', url: '/api/config', remoteAddress: '172.20.0.2', headers: { 'x-forwarded-for': `198.51.100.${i + 1}` } })).statusCode).toBe(200);
+    }
+    expect((await direct.app.inject({ method: 'GET', url: '/api/config', remoteAddress: '172.20.0.2', headers: { 'x-forwarded-for': '198.51.100.200' } })).statusCode).toBe(429);
+  });
   it('requires a valid session and CSRF for writes and rejects foreign browser origins', async () => {
     const f = await fixture(); const account = await f.login();
     expect((await f.app.inject({ method: 'GET', url: '/api/me' })).statusCode).toBe(401);

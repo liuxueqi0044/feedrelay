@@ -5,6 +5,7 @@ dotenv({path:resolve(process.cwd(),'../../.env'),quiet:true});dotenv({quiet:true
 const env=z.object({
   MODE:z.enum(['demo','production']).default('demo'), ROLE:z.enum(['all','api','control-worker','fetch-worker','delivery-worker']).default('all'),
   NODE_ENV:z.string().default('development'), PORT:z.coerce.number().default(4100), HOST:z.string().default('127.0.0.1'),
+  TRUSTED_PROXY_CIDRS:z.string().max(1024).default(''),
   PUBLIC_URL:z.url().default('http://localhost:3000'), DATABASE_URL:z.string().optional(),
   BOT_TOKEN:z.string().optional(), BOT_ID:z.string().default('demo-bot'), BOT_USERNAME:z.string().default('FeedRelayDemoBot'), WEBHOOK_SECRET:z.string().optional(),
   TELEGRAM_CLIENT_ID:z.string().optional(), TELEGRAM_CLIENT_SECRET:z.string().optional(),

@@ -46,7 +46,11 @@ The production services are:
 
 The fetch worker uses an explicit environment allowlist. Do not add a shared `env_file` to its service. All application roles still share one application database role in this MVP; the process boundary limits accidental credential exposure but does not isolate a compromised fetch process from database contents.
 
+Use a direct PostgreSQL endpoint or a pool in **session mode** for the application and pg-boss. Each Store transaction/read snapshot keeps one checked-out connection through completion; statement pooling cannot support those multi-statement transactions. Transaction pooling has not been validated with the complete migration, queue and session behavior and is not a supported substitute here. PgBouncer documents the differing feature support for [session, transaction and statement pooling](https://www.pgbouncer.org/features.html). The application's transaction-level advisory locks do not by themselves require session pooling; the session-mode requirement covers the complete stack.
+
 The web build sets `API_BASE=http://api:4100` and `NEXT_PUBLIC_SITE_URL=${PUBLIC_URL}` as build arguments because Next.js rewrites and public metadata are recorded during the build. Caddy also routes `/api/*` directly to the API. Changing either address requires rebuilding the web image. Caddy uses automatic HTTPS and its standard [reverse proxy forwarding behavior](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy); application authentication and webhook secrets remain required.
+
+The API defaults to an empty `TRUSTED_PROXY_CIDRS`, so a direct connection does not trust forwarded client addresses. Production Compose sets this variable only on the API to Docker's private IPv4 ranges (`10.0.0.0/8,172.16.0.0/12,192.168.0.0/16`) so Caddy's dynamic container address can supply the client IP used for rate limits. This setting assumes the API has **no published host port** and only trusted services can access its private Docker network. On another platform, restrict the value to the actual reverse proxy IPs/CIDRs; keep it empty for direct access. Do not expose the API port publicly while trusting broad private ranges.
 
 Run commands from the repository root, replacing the environment file path below:
 
@@ -77,25 +81,30 @@ An application image rollback is safe only when its database schema remains comp
 
 This repository contains deployable configuration, not a completed production deployment. Compose validation and automated package tests do not establish successful HTTPS issuance, OIDC registration, Telegram permissions, payment processing, or restore times on an operator's host.
 
-## Docker verification handoff — 2026-10-04
+## Repeatable isolated Docker smoke
 
-Docker Desktop's Linux engine (Docker 29.8.0, Compose 5.5.1) was available. Production Compose configuration validation passed using fake credentials under the unique project `feedrelay-smoke-20261004-15eeabb4`. The actual isolated image build used:
-
-```sh
-docker compose -p feedrelay-smoke-20261004-15eeabb4 --env-file work/deploy-smoke/smoke.env -f deploy/compose.production.yml -f work/deploy-smoke/override.yml config --quiet
-docker compose -p feedrelay-smoke-20261004-15eeabb4 --env-file work/deploy-smoke/smoke.env -f deploy/compose.production.yml -f work/deploy-smoke/override.yml build api web
-```
-
-Frozen dependency installs succeeded in Linux. The server image build then failed during `tsc --noEmit` with syntax errors in `apps/server/src/services/processor.ts` at lines 154, 167, 168, and 169. The web bundle compiled successfully, but its image build was canceled when the server build failed. Neither runtime image was completed. This was a snapshot of files being edited concurrently; rerun against the finalized source after resolving or confirming those syntax errors. No smoke containers, networks, or volumes were created, and no Telegram, OIDC, webhook setup, or payment action was performed. The engine's downloaded build cache was retained.
-
-To continue on a Linux/cloud executor, recreate the temporary `work/deploy-smoke` inputs if they are absent. Use only fake credentials: `PUBLIC_URL=https://smoke.feedrelay.invalid`, a `DATABASE_URL` pointing to Compose host `postgres`, a matching throwaway PostgreSQL password, fake bot/OIDC credentials, a webhook secret of at least 32 characters, and `BILLING_ENABLED=false`. Set `FEEDRELAY_TAG` to the unique smoke project name, `DOMAIN=smoke.feedrelay.invalid`, and `ACME_EMAIL=smoke@example.invalid`. The smoke override must make both `backend` and `egress` networks `internal: true` to prevent external service contact.
-
-After a successful rebuild, finish the isolated smoke check without starting Caddy, control-worker, or delivery-worker:
+Run the same script locally and in CI, using Node 22.12 or later and a local Linux Docker engine with Compose v2 or later. On Windows, start Docker Desktop in Linux container mode. The script refuses remote Docker endpoints. From the repository root:
 
 ```sh
-docker compose -p feedrelay-smoke-20261004-15eeabb4 --env-file work/deploy-smoke/smoke.env -f deploy/compose.production.yml -f work/deploy-smoke/override.yml up -d postgres api web fetch-worker
-docker compose -p feedrelay-smoke-20261004-15eeabb4 --env-file work/deploy-smoke/smoke.env -f deploy/compose.production.yml -f work/deploy-smoke/override.yml ps -a
-docker compose -p feedrelay-smoke-20261004-15eeabb4 --env-file work/deploy-smoke/smoke.env -f deploy/compose.production.yml -f work/deploy-smoke/override.yml logs --no-color migrate api web fetch-worker
+pnpm docker:smoke
+# Or without a host pnpm installation:
+node deploy/smoke.mjs
 ```
 
-Verify successful one-shot migration completion, API `/healthz` and `/api/config`, the web homepage and its same-origin `/api/config` rewrite, and the absence of `BOT_TOKEN` in the fetch-worker environment. Readiness can be checked with Node `fetch` from within the appropriate containers without publishing a host port. Do not call `bot:setup`, authenticate against Telegram, create deliveries, or buy an invoice during this smoke check. When finished, `docker compose` with exactly this smoke project and these files may run `down --volumes --remove-orphans`; never prune unrelated containers, networks, or volumes.
+To validate the engine and generated Compose inputs without building an image or creating a container/network/volume:
+
+```sh
+node deploy/smoke.mjs --prepare-only
+```
+
+Each invocation creates a random project name, fake credentials and a results directory at `work/deploy-smoke/<project>/`. Child commands receive explicit arguments and an overridden fake environment; no `SMOKE_DIR` export or shell wrapper is required. The script builds the actual production server and web Dockerfiles against the frozen lockfile. Image downloads and builds need Internet access; the runtime's `backend` and `egress` networks are both internal, and no service publishes a host port. It starts PostgreSQL, the one-shot migration, API, web and fetch worker. Caddy, control-worker and delivery-worker remain absent.
+
+Checks cover migration versions, database-backed API readiness, all five pg-boss queues and actual completion of a harmless fetch job for a nonexistent source, the production homepage and same-origin API rewrite, sitemap metadata, anonymous API rejection, disabled demo login, rejected unsigned webhook, read-only/nonroot application processes, and absence of Telegram/OIDC secrets in the fetch worker. Database assertions confirm that the run created no users, deliveries, payments or accepted webhook facts. The smoke API leaves `TRUSTED_PROXY_CIDRS` empty because its probes connect directly. Telegram login, webhook registration, real message delivery, subscriptions, payments, Caddy certificate issuance and public deployment are outside this smoke.
+
+The script writes `results.json`, `commands.log` and `runtime.log`, then its `finally` removes only the current project and its labeled image tags. It checks ownership labels before deleting resources and verifies that the project leaves no containers, networks or volumes. Shared base images and Docker build caches remain available. Never run a global Docker prune as smoke cleanup. If a process is forcibly killed or Docker disappears before cleanup, retry using that exact run's record:
+
+```sh
+node deploy/smoke.mjs --cleanup-record work/deploy-smoke/<project>/results.json
+```
+
+The Docker smoke workflow invokes this same portable script, retries project-scoped cleanup in an `always()` step, and retains only result/log artifacts. The generated fake environment is not uploaded. Current local verification evidence is recorded in [verification.md](verification.md); a successful smoke establishes the checks above, not a completed external production deployment.

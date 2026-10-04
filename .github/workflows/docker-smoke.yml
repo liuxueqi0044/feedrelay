@@ -16,187 +16,31 @@ concurrency:
 jobs:
   isolated-runtime:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      COMPOSE_PROJECT_NAME: feedrelay-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
 
-      - name: Prepare fake credentials and block runtime egress
-        shell: bash
-        run: |
-          set -euo pipefail
-          SMOKE_DIR="$RUNNER_TEMP/feedrelay-smoke"
-          echo "SMOKE_DIR=$SMOKE_DIR" >> "$GITHUB_ENV"
-          mkdir -p "$SMOKE_DIR"
-          cat > "$SMOKE_DIR/smoke.env" <<EOF
-          FEEDRELAY_TAG=$COMPOSE_PROJECT_NAME
-          DOMAIN=smoke.feedrelay.invalid
-          ACME_EMAIL=smoke@example.invalid
-          POSTGRES_DB=feedrelay
-          POSTGRES_USER=feedrelay
-          POSTGRES_PASSWORD=throwaway-smoke-password-not-production
-          DATABASE_URL=postgresql://feedrelay:throwaway-smoke-password-not-production@postgres:5432/feedrelay
-          PUBLIC_URL=https://smoke.feedrelay.invalid
-          BOT_ID=123456789
-          BOT_USERNAME=FeedRelaySmokeFakeBot
-          BOT_TOKEN=123456789:FAKE_ONLY_DO_NOT_USE
-          WEBHOOK_SECRET=smoke-only-webhook-secret-00000000000000000000
-          TELEGRAM_CLIENT_ID=fake-smoke-client
-          TELEGRAM_CLIENT_SECRET=fake-smoke-secret
-          BILLING_ENABLED=false
-          EOF
-          cat > "$SMOKE_DIR/override.yml" <<'EOF'
-          networks:
-            backend:
-              internal: true
-            egress:
-              internal: true
-          EOF
-          cat > "$SMOKE_DIR/compose.sh" <<'EOF'
-          #!/usr/bin/env bash
-          set -euo pipefail
-          exec docker compose --project-name "$COMPOSE_PROJECT_NAME" \
-            --env-file "$SMOKE_DIR/smoke.env" \
-            -f deploy/compose.production.yml -f "$SMOKE_DIR/override.yml" "$@"
-          EOF
-          chmod 700 "$SMOKE_DIR/compose.sh"
-          "$SMOKE_DIR/compose.sh" config --quiet
-          docker version
-          docker compose version
+      - name: Build and test isolated production images
+        run: node deploy/smoke.mjs
 
-      - name: Build actual server and web Docker images
-        id: images
-        timeout-minutes: 18
-        shell: bash
-        run: |
-          set -euo pipefail
-          "$SMOKE_DIR/compose.sh" build api web
-          "$SMOKE_DIR/compose.sh" pull postgres
+      # Normally finally has already removed the project. Also covers a canceled
+      # step after the script wrote the record path to GITHUB_ENV.
+      - name: Verify cleanup of only this run's resources
+        if: always() && env.FEEDRELAY_SMOKE_RECORD != ''
+        timeout-minutes: 3
+        run: node deploy/smoke.mjs --cleanup-record "$FEEDRELAY_SMOKE_RECORD"
 
-      - name: Start only database, migration, API, web, and fetch worker
-        timeout-minutes: 6
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Caddy, control-worker, and delivery-worker are deliberately absent.
-          # No ports are published and both runtime networks prohibit egress.
-          "$SMOKE_DIR/compose.sh" up -d postgres api web fetch-worker
-          for service in caddy control-worker delivery-worker; do
-            test -z "$("$SMOKE_DIR/compose.sh" ps -a -q "$service")"
-          done
-          for network in backend egress; do
-            test "$(docker network inspect "${COMPOSE_PROJECT_NAME}_${network}" --format '{{.Internal}}')" = true
-          done
-          migrate_id=$("$SMOKE_DIR/compose.sh" ps -a -q migrate)
-          test -n "$migrate_id"
-          test "$(docker inspect "$migrate_id" --format '{{.State.Status}} {{.State.ExitCode}}')" = 'exited 0'
-
-      - name: Verify safe runtime readiness and worker isolation
-        id: smoke
-        timeout-minutes: 4
-        shell: bash
-        run: |
-          set -euo pipefail
-          for service in api web fetch-worker; do
-            container_id=$("$SMOKE_DIR/compose.sh" ps -q "$service")
-            test -n "$container_id"
-            test "$(docker inspect "$container_id" --format '{{.State.Status}}')" = running
-            test "$(docker inspect "$container_id" --format '{{.HostConfig.ReadonlyRootfs}}')" = true
-            bindings=$(docker inspect "$container_id" --format '{{json .HostConfig.PortBindings}}')
-            test "$bindings" = '{}' || test "$bindings" = null
-          done
-
-          "$SMOKE_DIR/compose.sh" exec -T api node --input-type=module - <<'NODE'
-          import assert from 'node:assert/strict';
-          assert.equal(process.getuid(), 1000, 'API must run as the unprivileged node user');
-          for (const path of ['/health/live', '/healthz']) {
-            const response = await fetch(`http://127.0.0.1:4100${path}`, { signal: AbortSignal.timeout(5000) });
-            assert.equal(response.status, 200, path);
-            assert.equal((await response.json()).ok, true, path);
-          }
-          const response = await fetch('http://127.0.0.1:4100/api/config');
-          assert.equal(response.status, 200);
-          const config = await response.json();
-          assert.equal(config.mode, 'production');
-          assert.equal(config.billingEnabled, false);
-          assert.equal((await fetch('http://127.0.0.1:4100/api/me')).status, 401);
-          console.log('API liveness, database readiness, public configuration, and anonymous access verified.');
-          NODE
-
-          "$SMOKE_DIR/compose.sh" exec -T web node --input-type=module - <<'NODE'
-          import assert from 'node:assert/strict';
-          assert.equal(process.getuid(), 1000, 'Web must run as the unprivileged node user');
-          let lastError;
-          for (let attempt = 0; attempt < 45; attempt++) {
-            try {
-              const home = await fetch('http://127.0.0.1:3000/', { signal: AbortSignal.timeout(5000) });
-              assert.equal(home.status, 200);
-              assert.match(await home.text(), /FeedRelay/);
-              const proxy = await fetch('http://127.0.0.1:3000/api/config', { signal: AbortSignal.timeout(5000) });
-              assert.equal(proxy.status, 200);
-              const config = await proxy.json();
-              assert.equal(config.mode, 'production');
-              assert.equal(config.billingEnabled, false);
-              const sitemap = await fetch('http://127.0.0.1:3000/sitemap.xml');
-              assert.equal(sitemap.status, 200);
-              assert.match(await sitemap.text(), /https:\/\/smoke\.feedrelay\.invalid/);
-              console.log('Web homepage, same-origin API rewrite, and production metadata URL verified.');
-              process.exit(0);
-            } catch (error) {
-              lastError = error;
-              await new Promise(resolve => setTimeout(resolve, 2000));
-            }
-          }
-          throw lastError;
-          NODE
-
-          "$SMOKE_DIR/compose.sh" exec -T fetch-worker node --input-type=module - <<'NODE'
-          import assert from 'node:assert/strict';
-          assert.equal(process.getuid(), 1000);
-          assert.equal(process.env.ROLE, 'fetch-worker');
-          assert.equal(process.env.MODE, 'production');
-          for (const key of ['BOT_TOKEN', 'WEBHOOK_SECRET', 'TELEGRAM_CLIENT_SECRET']) {
-            assert.equal(process.env[key], undefined, `${key} must be absent from fetch worker`);
-          }
-          console.log('Fetch worker is unprivileged and has no Telegram credentials.');
-          NODE
-
-          for attempt in $(seq 1 30); do
-            if "$SMOKE_DIR/compose.sh" logs --no-color fetch-worker | grep -Fq 'FeedRelay started'; then
-              break
-            fi
-            test "$attempt" -lt 30
-            sleep 2
-          done
-          test "$("$SMOKE_DIR/compose.sh" exec -T postgres psql -U feedrelay -d feedrelay -Atqc 'SELECT max(version) >= 3 FROM fr_migrations')" = t
-          test "$("$SMOKE_DIR/compose.sh" exec -T postgres psql -U feedrelay -d feedrelay -Atqc "SELECT count(*) FROM pg_namespace WHERE nspname='pgboss'")" = 1
-          test "$("$SMOKE_DIR/compose.sh" exec -T postgres psql -U feedrelay -d feedrelay -Atqc 'SELECT count(*) FROM fr_deliveries')" = 0
-          test "$("$SMOKE_DIR/compose.sh" exec -T postgres psql -U feedrelay -d feedrelay -Atqc 'SELECT count(*) FROM fr_payments')" = 0
-          "$SMOKE_DIR/compose.sh" ps -a
-
-      - name: Record results and diagnostics
+      - name: Preserve smoke results and diagnostics
         if: always()
-        shell: bash
-        run: |
-          {
-            echo '## Isolated Docker smoke'
-            echo '- Image builds: ${{ steps.images.outcome }}'
-            echo '- Runtime checks: ${{ steps.smoke.outcome }}'
-            echo '- Uses throwaway credentials and internal-only runtime networks.'
-            echo '- Covers migrations, API/database readiness, web/API rewrite, public site metadata, and fetch-worker credential isolation.'
-            echo '- Does not test or perform Telegram sign-in, webhook setup, message delivery, payments, or public deployment.'
-          } >> "$GITHUB_STEP_SUMMARY"
-          if test -x "$SMOKE_DIR/compose.sh"; then
-            "$SMOKE_DIR/compose.sh" ps -a || true
-            "$SMOKE_DIR/compose.sh" logs --no-color --tail 100 migrate api web fetch-worker || true
-          fi
-
-      - name: Remove only this smoke project's resources
-        if: always()
-        timeout-minutes: 2
-        shell: bash
-        run: |
-          if test -x "$SMOKE_DIR/compose.sh"; then
-            "$SMOKE_DIR/compose.sh" down --volumes --remove-orphans --timeout 10
-          fi
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: ignore
+          retention-days: 7
+          path: |
+            work/deploy-smoke/*/results.json
+            work/deploy-smoke/*/commands.log
+            work/deploy-smoke/*/runtime.log

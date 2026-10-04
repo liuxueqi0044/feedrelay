@@ -16,7 +16,7 @@ afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
 async function fixture(initialize = true) {
   const store = new MemoryStore();
-  const testConfig: Config = { MODE: 'demo', ROLE: 'all', NODE_ENV: 'test', PORT: 4100, HOST: '127.0.0.1', PUBLIC_URL: 'http://localhost:3000', BOT_ID: 'test-bot', BOT_USERNAME: 'TestBot', BILLING_ENABLED: 'false', STARTER_STARS: 300, SUPPORT_EMAIL: '', TERMS_URL: '', DEMO_DATA_PATH: 'work/test-unused.json', LOG_LEVEL: 'error', FETCH_CONCURRENCY: 4 };
+  const testConfig: Config = { MODE: 'demo', ROLE: 'all', NODE_ENV: 'test', PORT: 4100, HOST: '127.0.0.1', TRUSTED_PROXY_CIDRS: '', PUBLIC_URL: 'http://localhost:3000', BOT_ID: 'test-bot', BOT_USERNAME: 'TestBot', BILLING_ENABLED: 'false', STARTER_STARS: 300, SUPPORT_EMAIL: '', TERMS_URL: '', DEMO_DATA_PATH: 'work/test-unused.json', LOG_LEVEL: 'error', FETCH_CONCURRENCY: 4 };
   const billing = new BillingService(store, { botId: testConfig.BOT_ID, billingEnabled: false });
   const telegram = new TelegramClient(undefined, true);
   const auth = new AuthService(store, testConfig);

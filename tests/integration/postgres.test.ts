@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { createServer } from 'node:net';
 import EmbeddedPostgres from 'embedded-postgres';
 import { PgBoss } from '../../apps/server/node_modules/pg-boss/dist/index.js';
-import { beforeAll, afterAll, describe, it, expect } from 'vitest';
+import { beforeAll, afterAll, describe, it, expect, vi } from 'vitest';
 import { PostgresStore } from '../../apps/server/src/infrastructure/store.js';
 import { migrate } from '../../apps/server/src/infrastructure/migrations.js';
 import { nowISO, newId, type Entity, type Source, type Item } from '../../packages/core/src/index.js';
@@ -19,6 +19,11 @@ beforeAll(async()=>{
   store=new PostgresStore(connection);await migrate(store.pool);
 },60000);
 afterAll(async()=>{await boss?.stop({graceful:true,timeout:5000});await store?.close();await embedded?.stop();},30000);
+async function expectLocksFree(keys:string[]){
+  const client=await store.pool.connect(),held:string[]=[];
+  try{for(const key of keys){const result=await client.query<{locked:boolean}>('SELECT pg_try_advisory_lock(hashtextextended($1,0)) AS locked',[key]);if(result.rows[0]?.locked)held.push(key);expect(result.rows[0]?.locked).toBe(true);}}
+  finally{for(const key of held.reverse())await client.query('SELECT pg_advisory_unlock(hashtextextended($1,0))',[key]);client.release();}
+}
 describe('real PostgreSQL persistence and queue',()=>{
   it('migration is repeatable and business keys reject duplicates',async()=>{
     await migrate(store.pool);const user={id:newId(),createdAt:nowISO(),telegramId:'555100001',name:'Owner',privateChatStarted:true};await store.transaction(['identity'],tx=>tx.put('users',user));
@@ -43,13 +48,79 @@ describe('real PostgreSQL persistence and queue',()=>{
     const id=newId();await store.transaction(['counter'],tx=>tx.put('recovery',{id,createdAt:nowISO(),value:0}));
     await Promise.all(Array.from({length:8},()=>store.transaction(['counter'],async tx=>{const r=(await tx.get<Entity & {value:number}>('recovery',id))!;r.value++;await tx.put('recovery',r);})));expect((await store.read(tx=>tx.get<Entity & {value:number}>('recovery',id)))?.value).toBe(8);
   });
+  it('serializes heavy same-key concurrency across two independent pools without stale snapshots',async()=>{
+    const left=new PostgresStore(connection,8),right=new PostgresStore(connection,8),id=newId(),keys=['counter:'+id,'aggregate:'+id];let calls=0;
+    try{
+      await left.transaction(keys,tx=>tx.put('recovery',{id,createdAt:nowISO(),value:0}));
+      await Promise.all(Array.from({length:64},(_,index)=>(index%2?left:right).transaction(index%2?[...keys,keys[0]!]:[...keys].reverse(),async tx=>{
+        calls++;const row=(await tx.get<Entity & {value:number}>('recovery',id))!;
+        await new Promise(resolve=>setTimeout(resolve,2));row.value++;await tx.put('recovery',row);
+      })));
+      expect((await store.read(tx=>tx.get<Entity & {value:number}>('recovery',id)))?.value).toBe(64);
+      expect(calls).toBe(64);await expectLocksFree(keys);
+    }finally{await Promise.all([left.close(),right.close()]);}
+  },20000);
+  it('rolls back business writes and clears session locks before returning a connection to the pool',async()=>{
+    const isolated=new PostgresStore(connection,1),id=newId(),keys=['rollback:a:'+id,'rollback:b:'+id];let calls=0;
+    try{
+      await expect(isolated.transaction(keys,async tx=>{calls++;await tx.put('audit',{id,createdAt:nowISO()});throw new Error('business_rollback');})).rejects.toThrow('business_rollback');
+      expect(calls).toBe(1);expect(await store.read(tx=>tx.get('audit',id))).toBeUndefined();
+      const remaining=await isolated.pool.query<{count:string}>("SELECT count(*) AS count FROM pg_locks WHERE locktype='advisory' AND pid=pg_backend_pid()");expect(remaining.rows[0]?.count).toBe('0');
+      await expectLocksFree(keys);
+      await isolated.transaction(keys,tx=>tx.put('audit',{id,createdAt:nowISO()}));expect(await store.read(tx=>tx.get('audit',id))).toBeDefined();
+    }finally{await isolated.close();}
+  });
+  it('cleans a partially acquired lock set after a real PostgreSQL lock timeout',async()=>{
+    const isolated=new PostgresStore(connection,1),suffix=newId(),first='partial:a:'+suffix,second='partial:b:'+suffix,blocker=await store.pool.connect();let called=false;
+    try{
+      await blocker.query('SELECT pg_advisory_lock(hashtextextended($1,0))',[second]);await isolated.pool.query("SET lock_timeout='75ms'");
+      await expect(isolated.transaction([second,first],async()=>{called=true;})).rejects.toMatchObject({code:'55P03'});
+      expect(called).toBe(false);await expectLocksFree([first]);
+      const remaining=await isolated.pool.query<{count:string}>("SELECT count(*) AS count FROM pg_locks WHERE locktype='advisory' AND pid=pg_backend_pid()");expect(remaining.rows[0]?.count).toBe('0');
+    }finally{await blocker.query('SELECT pg_advisory_unlock(hashtextextended($1,0))',[second]);blocker.release();await isolated.close();}
+  });
+  it('destroys a connection after unlock failure while preserving its already committed result',async()=>{
+    const isolated=new PostgresStore(connection,1),id=newId(),keys=['cleanup:a:'+id,'cleanup:b:'+id],client=await isolated.pool.connect();
+    const original=client.query.bind(client),pid=(await client.query<{pid:number}>('SELECT pg_backend_pid() AS pid')).rows[0]!.pid;let failedUnlocks=0;
+    const fault=vi.spyOn(client,'query').mockImplementation(((...args:unknown[])=>{
+      const text=typeof args[0]==='string'?args[0]:(args[0] as {text?:string})?.text;
+      if(text?.startsWith('SELECT pg_advisory_unlock(')){failedUnlocks++;return Promise.reject(new Error('injected_unlock_failure'));}
+      return (original as (...input:unknown[])=>unknown)(...args);
+    }) as typeof client.query);client.release();
+    try{
+      await expect(isolated.transaction(keys,async tx=>{await tx.put('audit',{id,createdAt:nowISO()});return 'committed';})).resolves.toBe('committed');
+      expect(failedUnlocks).toBe(1);expect(await store.read(tx=>tx.get('audit',id))).toBeDefined();fault.mockRestore();
+      const replacement=await isolated.pool.query<{pid:number}>('SELECT pg_backend_pid() AS pid');expect(replacement.rows[0]?.pid).not.toBe(pid);await expectLocksFree(keys);
+    }finally{fault.mockRestore();await isolated.close();}
+  });
+  it('destroys a session when an acquisition reply is lost after PostgreSQL grants the lock',async()=>{
+    const isolated=new PostgresStore(connection,1),suffix=newId(),keys=['lost:a:'+suffix,'lost:b:'+suffix],client=await isolated.pool.connect();let called=false;
+    const original=client.query.bind(client),pid=(await client.query<{pid:number}>('SELECT pg_backend_pid() AS pid')).rows[0]!.pid;
+    const fault=vi.spyOn(client,'query').mockImplementation((async(...args:unknown[])=>{
+      const result=await (original as (...input:unknown[])=>Promise<unknown>)(...args);
+      if(typeof args[0]==='string'&&args[0].startsWith('SELECT pg_advisory_lock(')&&(args[1] as string[])[0]===keys[1])throw new Error('lost_acquisition_reply');
+      return result;
+    }) as typeof client.query);client.release();
+    try{
+      await expect(isolated.transaction(keys,async()=>{called=true;})).rejects.toThrow('lost_acquisition_reply');expect(called).toBe(false);fault.mockRestore();
+      const replacement=await isolated.pool.query<{pid:number}>('SELECT pg_backend_pid() AS pid');expect(replacement.rows[0]?.pid).not.toBe(pid);await expectLocksFree(keys);
+    }finally{fault.mockRestore();await isolated.close();}
+  });
+  it('keeps serialization retries bounded and reads SQLSTATE from wrapped causes',async()=>{
+    const isolated=new PostgresStore(connection,1),key='retry:'+newId();let calls=0;
+    const failure=()=>new Error('query_wrapper',{cause:new Error('driver_wrapper',{cause:Object.assign(new Error('serialization_failure'),{code:'40001'})})});
+    try{
+      await expect(isolated.transaction([key],async()=>{if(++calls<3)throw failure();return 'ok';})).resolves.toBe('ok');expect(calls).toBe(3);
+      calls=0;await expect(isolated.transaction([key],async()=>{calls++;throw failure();})).rejects.toThrow('query_wrapper');expect(calls).toBe(6);await expectLocksFree([key]);
+    }finally{await isolated.close();}
+  });
   it('pg-boss dispatches a persisted job and supports singleton keys',async()=>{
     boss=new PgBoss({connectionString:connection,schema:'pgboss',max:3});boss.on('error',()=>{});await boss.start();await boss.createQueue('test-delivery',{policy:'singleton',retryLimit:0});
     let result:string|undefined;await boss.work<{id:string}>('test-delivery',{pollingIntervalSeconds:0.5},async jobs=>{result=jobs[0]?.data.id;});await boss.send('test-delivery',{id:'hello'},{singletonKey:'hello',retryLimit:0});
     const deadline=Date.now()+10000;while(!result&&Date.now()<deadline)await new Promise(r=>setTimeout(r,100));expect(result).toBe('hello');
   },15000);
   it('runs the full feed to delivery loop through PostgreSQL and pg-boss',async()=>{
-    const config:Config={MODE:'demo',ROLE:'all',NODE_ENV:'test',PORT:4100,HOST:'127.0.0.1',PUBLIC_URL:'http://localhost:3000',BOT_ID:'demo-bot',BOT_USERNAME:'TestBot',BILLING_ENABLED:'false',STARTER_STARS:300,SUPPORT_EMAIL:'',TERMS_URL:'',DEMO_DATA_PATH:'unused',LOG_LEVEL:'error',FETCH_CONCURRENCY:2};
+    const config:Config={MODE:'demo',ROLE:'all',NODE_ENV:'test',PORT:4100,HOST:'127.0.0.1',TRUSTED_PROXY_CIDRS:'',PUBLIC_URL:'http://localhost:3000',BOT_ID:'demo-bot',BOT_USERNAME:'TestBot',BILLING_ENABLED:'false',STARTER_STARS:300,SUPPORT_EMAIL:'',TERMS_URL:'',DEMO_DATA_PATH:'unused',LOG_LEVEL:'error',FETCH_CONCURRENCY:2};
     const services=await runtime(config,store);const {actor}=await services.auth.identity('555100002','Queue owner',true);const source=await services.feeds.addSource(actor,'https://demo.feedrelay.invalid/queue.xml');const destination=await services.feeds.privateDestination(actor);const route=await services.feeds.saveRoute(actor,{name:'Integration route',sourceBindingId:source.id,destinationId:destination.id,requestedIntervalMinutes:60});
     const errors:Array<{code:string;error?:unknown}>=[];const jobs=new Jobs(store,services.processor,{...config,MODE:'production',DATABASE_URL:connection},(code,error)=>errors.push({code,error}));
     const wait=async(predicate:()=>Promise<boolean>)=>{const end=Date.now()+15000;while(Date.now()<end){if(await predicate())return;await new Promise(r=>setTimeout(r,100));}throw new Error('Pipeline did not reach expected state: '+JSON.stringify(errors));};

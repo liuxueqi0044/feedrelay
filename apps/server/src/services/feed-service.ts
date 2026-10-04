@@ -18,6 +18,12 @@ export function render(item:Pick<Item,'title'|'summary'|'url'>,rules:Rules){
 }
 export class FeedService {
   constructor(readonly store:Store,readonly billing:BillingService,readonly telegram:TelegramClient,readonly config:Config){}
+  private opmlUrl=(input:string)=>{
+    if(this.config.MODE==='demo'){
+      try{const url=new URL(input);if(url.hostname==='demo.feedrelay.invalid'&&['http:','https:'].includes(url.protocol)&&!url.username&&!url.password&&(!url.port||['80','443'].includes(url.port))&&url.href.length<=2048){url.hash='';return url;}}catch{/* Use the normal public URL error below. */}
+    }
+    return validatePublicUrl(input);
+  };
   async addSource(actor:Actor,input:string){
     let url:URL;try{url=new URL(input.trim());}catch{throw new AppError('invalid_url','Enter a valid public RSS or Atom URL.');}
     if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.port&&url.port!=='80'&&url.port!=='443')throw new AppError('invalid_url','Public HTTP or HTTPS feeds without credentials are supported.');
@@ -36,8 +42,8 @@ export class FeedService {
   async checkSource(actor:Actor,id:string){return this.store.transaction(['workspace:'+actor.workspaceId],async tx=>{await requireWorkspace(tx,actor);const b=await owned<SourceBinding>(tx,'sourceBindings',id,actor.workspaceId);const checks=await tx.list<Entity & {action:string}>('audit',{workspaceId:actor.workspaceId,action:'source_check',createdAt:{gt:plusMs(nowISO(),-3600000)}});if(checks.length>=6)throw new AppError('check_limit','Manual checks are limited to six per hour.',429);await emit(tx,'fetch',b.sourceId);await audit(tx,'source_check',id,actor);return {queued:true};});}
   async removeSource(actor:Actor,id:string){return this.store.transaction(['workspace:'+actor.workspaceId],async tx=>{await requireWorkspace(tx,actor);const b=await owned<SourceBinding>(tx,'sourceBindings',id,actor.workspaceId);b.state='disabled';b.version++;await tx.put('sourceBindings',b);for(const r of await tx.list<Route>('routes',{workspaceId:actor.workspaceId,sourceBindingId:id})){r.state='paused';r.pauseReason='source_removed';r.version++;await tx.put('routes',r);}await audit(tx,'source_removed',id,actor);});}
   async sourceItems(actor:Actor,id:string){return this.store.read(async tx=>{await requireWorkspace(tx,actor);const b=await owned<SourceBinding>(tx,'sourceBindings',id,actor.workspaceId);return tx.list<Item>('items',{sourceId:b.sourceId},{orderBy:'seq',direction:'desc',limit:20});});}
-  async export(actor:Actor){return exportOpml((await this.listSources(actor)).map(s=>({title:s.title,url:s.url})),'FeedRelay subscriptions');}
-  previewImport(xml:string){const result=parseOpml(xml);if(result.feeds.length>100)throw new AppError('import_limit','Import at most 100 feeds at a time.');return {feeds:result.feeds,warnings:[]};}
+  async export(actor:Actor){return exportOpml((await this.listSources(actor)).map(s=>({title:s.title,url:s.url})),'FeedRelay subscriptions',this.opmlUrl);}
+  previewImport(xml:string){const result=parseOpml(xml,this.opmlUrl);if(result.feeds.length>100)throw new AppError('import_limit','Import at most 100 feeds at a time.');return {feeds:result.feeds,warnings:[]};}
   async import(actor:Actor,feeds:Array<{url:string;title?:string}>){const results=[];for(const feed of feeds){try{results.push({url:feed.url,source:await this.addSource(actor,feed.url)});}catch(e){results.push({url:feed.url,error:e instanceof AppError?e.message:'This source could not be added.'});}}return {results};}
   async privateDestination(actor:Actor){return this.store.transaction(['workspace:'+actor.workspaceId,'chat:'+actor.telegramId],async tx=>{
     await requireWorkspace(tx,actor);const existing=(await tx.list<Destination>('destinations',{chatId:actor.telegramId}))[0];if(existing&&existing.state!=='disabled'){if(existing.workspaceId!==actor.workspaceId)throw new AppError('chat_claimed','This chat belongs to another workspace.',409);return existing;}
