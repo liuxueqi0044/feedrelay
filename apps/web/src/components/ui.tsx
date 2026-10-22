@@ -30,7 +30,7 @@ export function Brand({ compact = false }: { compact?: boolean }) {
 }
 export function Status({ value }: { value: string }) {
   const good = ["active", "sent", "connected", "verified", "ready", "ok", "paid", "enabled", "completed", "healthy"].includes(value);
-  const bad = ["failed", "error", "blocked", "uncertain", "invalid", "removed", "disabled"].includes(value);
+  const bad = ["failed", "error", "blocked", "uncertain", "unknown", "dead", "dead_letter", "needs_review", "invalid", "removed", "disabled"].includes(value);
   return <span className={`status ${good ? "good" : bad ? "bad" : "neutral"}`}><span/>{value.replaceAll("_", " ")}</span>;
 }
 export function Empty({ icon, title, text, action }: { icon: IconName; title: string; text: string; action?: ReactNode }) {

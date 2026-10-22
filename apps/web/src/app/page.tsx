@@ -1,29 +1,62 @@
 import Link from "next/link";
 import { Brand, Icon } from "@/components/ui";
 import { Pricing } from "@/components/pricing";
+import styles from "./landing.module.css";
+
+const steps = [
+  { number: "01", icon: "rss" as const, title: "Bring your sources.", text: "Paste an RSS or Atom URL. Already have a collection? Import it all with OPML.", detail: "Blogs · publications · release notes" },
+  { number: "02", icon: "filter" as const, title: "Keep the good stuff.", text: "Choose the keywords you want, skip the ones you don’t, and set how often we check.", detail: "Your sources. Your rules." },
+  { number: "03", icon: "telegram" as const, title: "Meet it in Telegram.", text: "Send matching updates to your private chat or a channel. Open the original when you’re ready.", detail: "One familiar place to catch up" },
+];
+
+function RelayPreview() {
+  return <div className={styles.relayPreview} aria-label="Example: RSS sources filtered into a Telegram message">
+    <div className={styles.previewBar}><span><i/> YOUR READING FLOW</span><span className={styles.example}>ILLUSTRATION</span></div>
+    <div className={styles.previewSources}>
+      <div className={styles.sourceNote}><span className={styles.rssIcon}><Icon name="rss" size={21}/></span><div><strong>Engineering notes</strong><span>RSS feed · new article</span></div><Icon name="check" size={16}/></div>
+      <div className={styles.sourceNote}><span className={styles.designIcon}><Icon name="source" size={21}/></span><div><strong>Design dispatch</strong><span>Atom feed · new article</span></div><Icon name="check" size={16}/></div>
+    </div>
+    <div className={styles.connector}><span/><div><Icon name="filter" size={15}/> Your keyword filters <Icon name="check" size={14}/></div><span/></div>
+    <div className={styles.telegramPreview}>
+      <div className={styles.telegramHeader}><span className={styles.telegramIcon}><Icon name="telegram" size={23}/></span><div><strong>My reading corner</strong><span>Telegram · private chat</span></div><span className={styles.messageDot}/></div>
+      <div className={styles.messageBubble}><span className={styles.messageSource}>ENGINEERING NOTES</span><h3>Build less. Make it matter.</h3><p>A field guide to small, useful tools — and the ideas that make them work.</p><span className={styles.articleLink}>Read the original <Icon name="external" size={12}/></span><div className={styles.messageTime}>Example update <Icon name="check" size={13}/><Icon name="check" size={13}/></div></div>
+    </div>
+    <div className={styles.previewBottom}><Icon name="route" size={15}/><span>A direct line from source to inbox.</span></div>
+  </div>;
+}
 
 export default function Home() {
-  return <div className="landing">
-    <header className="site-header"><div className="site-nav"><Brand/><nav aria-label="Main navigation"><a href="#how-it-works">How it works</a><a href="#made-for-you">Features</a><a href="#pricing">Pricing</a></nav><Link className="button nav-button" href="/dashboard">Open workspace<Icon name="arrow" size={16}/></Link></div></header>
-    <main>
-      <section className="hero section-wrap">
-        <div className="hero-copy"><div className="hero-eyebrow"><span className="live-dot"/> A quieter way to keep up</div><h1>Your favorite sources.<br/><span>One familiar inbox.</span></h1><p>Bring the web you care about to Telegram. FeedRelay turns RSS and Atom feeds into useful updates, with a little less noise along the way.</p><div className="hero-actions"><Link className="button primary large" href="/dashboard">Connect your first feed<Icon name="arrow" size={19}/></Link><a className="text-link" href="#how-it-works">See how it works<Icon name="chevron" size={16}/></a></div><div className="hero-footnote"><Icon name="check" size={15}/>Free to get started <span/> No new reading app to learn</div></div>
-        <div className="hero-visual" aria-label="Illustration of a feed update becoming a Telegram message"><div className="visual-label"><span/> An example of a simpler flow</div><div className="feed-stack"><div className="feed-note"><span className="feed-logo terra"><Icon name="rss"/></span><div><strong>Engineering notes</strong><span>New ideas, straight from the source</span></div><Icon name="check" size={16}/></div><div className="feed-note"><span className="feed-logo lavender"><Icon name="rss"/></span><div><strong>Design dispatch</strong><span>Thoughtful things from around the web</span></div><Icon name="check" size={16}/></div></div><div className="relay-path"><span className="path-line"/><div className="relay-node"><Icon name="filter" size={20}/><span>Only what matters</span></div><span className="path-line"/><Icon name="arrow" size={18}/></div><div className="telegram-card"><div className="telegram-card-header"><span className="telegram-avatar"><Icon name="telegram" size={23}/></span><div><strong>Your reading corner</strong><span>Telegram destination</span></div><span className="example-badge">Example</span></div><div className="telegram-card-body"><div className="message-source"><span className="tiny-square"/> Engineering notes</div><h3>Small systems, better habits</h3><p>A new perspective on making the tools we use every day feel a little more human.</p><span className="message-link">Read the original ↗</span><div className="message-footer">Delivered by FeedRelay<Icon name="check" size={13}/></div></div></div><div className="visual-caption"><Icon name="route" size={16}/><span>Source → your rules → your Telegram</span></div></div>
+  return <div className={styles.page}>
+    <a className={styles.skipLink} href="#main">Skip to content</a>
+    <header className={styles.header}><div className={styles.nav}><Brand/><nav aria-label="Main navigation"><a href="#how-it-works">How it works</a><a href="#features">Features</a><a href="#pricing">Pricing</a></nav><Link className={styles.navCta} href="/dashboard">Open workspace<Icon name="arrow" size={17}/></Link></div></header>
+    <main id="main">
+      <section className={`${styles.hero} ${styles.wrap}`}>
+        <div className={styles.heroCopy}>
+          <div className={styles.eyebrow}><span/> LESS CHECKING. MORE READING.</div>
+          <h1>The web moves.<br/>Your inbox<br/><span>keeps up.</span></h1>
+          <p>Your favorite blogs, newsletters with RSS, and release notes. Filtered to what matters. Delivered straight to Telegram.</p>
+          <div className={styles.heroActions}><Link className="button primary large" href="/dashboard">Connect your first feed<Icon name="arrow" size={18}/></Link><a className={styles.secondaryLink} href="#how-it-works">See how it works<Icon name="chevron" size={15}/></a></div>
+          <div className={styles.heroFootnote}><span><Icon name="check" size={15}/> Free to get started</span><span><Icon name="check" size={15}/> No new reading app</span></div>
+        </div>
+        <RelayPreview/>
       </section>
-      <section className="promise-strip"><div className="section-wrap"><span>Follow the source.</span><span>Keep the context.</span><span>Skip the constant checking.</span><div><Icon name="rss" size={18}/><span>RSS & Atom → Telegram</span></div></div></section>
-      <section id="how-it-works" className="how-section section-wrap"><div className="section-heading"><div><span className="eyebrow">A few connections. A calmer day.</span><h2>From feed to inbox,<br/>in three small steps.</h2></div><p>Set it up once, then let the updates come to you. Your workspace keeps every connection in view.</p></div><div className="steps-grid">{[
-        { n:"01", icon:"rss" as const, title:"Pick your sources", text:"Add an RSS or Atom feed URL, or bring your existing collection with an OPML import." },
-        { n:"02", icon:"telegram" as const, title:"Choose a destination", text:"Receive updates privately, or connect a Telegram channel where your bot can post." },
-        { n:"03", icon:"filter" as const, title:"Make it your own", text:"Connect a route, choose a checking interval, and filter updates with the keywords that matter to you." },
-      ].map(step => <article className="step-card" key={step.n}><div className="step-top"><span className="step-icon"><Icon name={step.icon} size={25}/></span><span>{step.n}</span></div><h3>{step.title}</h3><p>{step.text}</p></article>)}</div></section>
-      <section id="made-for-you" className="features-section"><div className="section-wrap feature-layout"><div className="feature-intro"><span className="eyebrow">Thoughtful by design</span><h2>More signal.<br/><span>More breathing room.</span></h2><p>Good tools don’t need your attention all day. They help you spend it on something worthwhile.</p><Link href="/dashboard" className="text-link">Make your first connection<Icon name="arrow" size={17}/></Link><div className="decorative-route" aria-hidden="true"><span><Icon name="rss" size={25}/></span><i/><span><Icon name="filter" size={25}/></span><i/><span><Icon name="telegram" size={25}/></span></div></div><div className="feature-list">{[
-        { icon:"filter" as const, title:"Let the right stories through", text:"Include or exclude keywords in titles or full feed content. Preview the message before a route goes live." },
-        { icon:"log" as const, title:"Know what made it through", text:"See sent, pending, and failed messages in one delivery log. If something goes wrong, there’s a clear place to start." },
-        { icon:"pause" as const, title:"Keep control of the flow", text:"Pause a route when you need a break. Resume with recent updates or pick up with new posts only." },
-        { icon:"download" as const, title:"Bring your collection with you", text:"Import and export sources with OPML. The feeds you follow remain yours to take wherever you like." },
-      ].map(x => <article key={x.title}><span className="feature-icon"><Icon name={x.icon} size={21}/></span><div><h3>{x.title}</h3><p>{x.text}</p></div></article>)}</div></div></section>
-      <section id="pricing" className="pricing-section section-wrap"><div className="section-heading pricing-heading"><div><span className="eyebrow">Start small. Stay in control.</span><h2>A plan for your pace.</h2></div><p>Start with Free. When you need more room, Starter brings higher limits and more frequent checks.</p></div><Pricing/><p className="pricing-caption">Paid plans use Telegram Stars. Availability and the current price are shown in your workspace before purchase.</p></section>
-      <section className="closing-section section-wrap"><div><span className="eyebrow">The internet, at your pace</span><h2>A little less checking.<br/>A little more reading.</h2></div><Link className="button primary large" href="/dashboard">Find your flow<Icon name="arrow" size={19}/></Link></section>
-    </main><footer className="site-footer section-wrap"><Brand/><p>Good sources. Clear connections.</p><div><a href="#pricing">Plans</a><Link href="/privacy">Privacy</Link><Link href="/terms">Terms</Link><span>© {new Date().getFullYear()} FeedRelay</span></div></footer>
+      <div className={styles.sourceStrip}><div className={styles.wrap}><span className={styles.stripLabel}>ONE PLACE FOR YOUR</span><span><Icon name="source" size={19}/> Favorite blogs</span><span><Icon name="log" size={19}/> Release notes</span><span><Icon name="rss" size={19}/> RSS newsletters</span><span><Icon name="destination" size={19}/> Industry updates</span></div></div>
+      <section className={`${styles.howSection} ${styles.wrap}`} id="how-it-works">
+        <div className={styles.sectionHeading}><div><span className={styles.kicker}>01 / SET YOUR FLOW</span><h2>Three connections.<br/>A lot fewer open tabs.</h2></div><p>Stop making the rounds.<br/>Let the next good read come to you.</p></div>
+        <div className={styles.steps}>{steps.map(step => <article key={step.number} className={styles.step}><div className={styles.stepTop}><span className={styles.stepIcon}><Icon name={step.icon} size={25}/></span><span>{step.number}</span></div><h3>{step.title}</h3><p>{step.text}</p><small>{step.detail}</small></article>)}</div>
+      </section>
+      <section className={`${styles.featureSection} ${styles.wrap}`} id="features">
+        <div className={styles.sectionHeading}><div><span className={styles.kicker}>02 / KEEP THE SIGNAL</span><h2>Less noise.<br/>More on your terms.</h2></div><p>Simple controls for the things you follow.<br/>A clear record of what gets through.</p></div>
+        <div className={styles.featureGrid}>
+          <article className={styles.filterFeature}><div className={styles.featureText}><span className={styles.featureIcon}><Icon name="filter" size={23}/></span><h3>A feed is a start.<br/>Your rules make it yours.</h3><p>Include the keywords you care about. Exclude the rest. Match titles or full feed content, and preview before you send.</p></div><div className={styles.filterExample} aria-label="Example keyword rules"><div><span>INCLUDE</span><span className={styles.includeTag}>design</span><span className={styles.includeTag}>engineering</span></div><div><span>EXCLUDE</span><span className={styles.excludeTag}>sponsored <Icon name="close" size={11}/></span></div><div className={styles.filterResult}><Icon name="check" size={16}/> Your reading list, with a little more intention.</div></div></article>
+          <article className={styles.logFeature}><span className={styles.featureIcon}><Icon name="log" size={23}/></span><h3>No mystery messages.</h3><p>See what was sent, what’s waiting, and what needs attention in your delivery log.</p><div className={styles.logExample} aria-label="Example delivery statuses"><div><span><i/> Release notes</span><span>Sent <Icon name="check" size={12}/></span></div><div><span><i/> Weekly dispatch</span><span>Pending <Icon name="clock" size={12}/></span></div></div></article>
+          <article className={styles.smallFeature}><span className={styles.featureIcon}><Icon name="pause" size={23}/></span><div><h3>Your pace. Your pause button.</h3><p>Pause any route. When you’re ready, catch up on recent updates or start fresh.</p></div></article>
+          <article className={styles.smallFeature}><span className={styles.featureIcon}><Icon name="download" size={23}/></span><div><h3>Your collection stays yours.</h3><p>Move feeds in or out with OPML. Your sources are always yours to take along.</p></div></article>
+        </div>
+      </section>
+      <section className={`${styles.pricingSection} ${styles.wrap}`} id="pricing"><div className={styles.sectionHeading}><div><span className={styles.kicker}>03 / FIND YOUR PACE</span><h2>Start with a few favorites.</h2></div><p>Free gives you room to get started.<br/>Starter gives your collection room to grow.</p></div><Pricing/><p className={styles.pricingNote}>Paid plans use Telegram Stars. Check availability and the current price in your workspace before purchase.</p></section>
+      <section className={styles.closing}><div className={styles.wrap}><div><span className={styles.closingLabel}><Icon name="rss" size={17}/> THE NEXT GOOD READ IS OUT THERE.</span><h2>Give it a way<br/>to find you.</h2></div><div className={styles.closingAction}><Link className="button large" href="/dashboard">Create your reading flow<Icon name="arrow" size={20}/></Link><p>Good sources. One familiar inbox.</p></div></div><span className={styles.closingDecoration} aria-hidden="true"><Icon name="rss" size={260}/></span></section>
+    </main>
+    <footer className={`${styles.footer} ${styles.wrap}`}><div><Brand/><p>A direct line to what matters.</p></div><nav aria-label="Footer navigation"><a href="#pricing">Plans</a><Link href="/case-study">Behind the build</Link><Link href="/privacy">Privacy</Link><Link href="/terms">Terms</Link></nav><small>© {new Date().getFullYear()} FeedRelay</small></footer>
   </div>;
 }
