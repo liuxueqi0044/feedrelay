@@ -21,6 +21,16 @@ pnpm dev
 
 演示模式使用持久化 JSON 存储和模拟 Telegram，仅监听本机地址。**演示投递不会发送到真实 Telegram，也不接受真实支付。** 不填写任何凭据即可运行；Ctrl+C 停止。生产模式采用 PostgreSQL、pg-boss 和真实 Bot API，代码调用同一组领域服务。
 
+## 作品案例
+
+本地启动后，英文案例位于 `/case-study`，中文版位于 `/case-study/zh`。首页页脚的 **Behind the build** 可进入英文案例。
+
+案例包括真实改版对比、手机截图、演示步骤、验证记录与项目咨询入口。它明确标注为自主开发作品，截图使用演示数据，不作为客户收入或增长证明。咨询表单只打开邮件草稿或复制需求，不存储信息、不自动发送邮件。
+
+页面内容位于 `apps/web/src/components/case-study.tsx`；交互位于 `case-interactions.tsx`；素材位于 `apps/web/public/case-study`。联系邮箱采用已公开的 `xueqi@xueqiliu.com`。
+
+案例当前连接同站点的 `/dashboard`，体验说明对应本地 demo 模式。发布时配置 `NEXT_PUBLIC_SITE_URL`，并根据实际部署提供隔离演示入口或调整体验步骤；不要把生产登录、真实发送或支付描述为模拟演示。本次案例改造不代表已经公开部署。
+
 ## 模块与目录
 
 | 架构模块 | 实现位置 |
