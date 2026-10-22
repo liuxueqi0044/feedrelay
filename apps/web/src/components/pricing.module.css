@@ -13,4 +13,3 @@
 .card li svg { margin-top: 2px; color: #365cf5; }
 .card > a { width: 100%; margin-top: auto; min-height: 46px; font-size: 13px; white-space: normal; text-align: center; }
 @media (max-width: 720px) { .grid { grid-template-columns: minmax(0, 1fr); gap: 18px; } .card { padding: 25px; } .price { font-size: 42px; } .priceNote { font-size: 25px; } .card ul { margin-top: 20px; padding-top: 22px; } .label { flex-wrap: wrap; gap: 8px; } }
-
